@@ -1,8 +1,10 @@
-name: Build APK
+name: Build APK ve AAB
 on: workflow_dispatch
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
       - name: Zip'i ac
@@ -22,10 +24,48 @@ jobs:
           keytool -genkeypair -keystore debug.keystore -storepass android
           -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048
           -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-      - name: APK derle
+      - name: Yukleme anahtari (upload key) hazirla
         working-directory: src
-        run: gradle assembleDebug --no-daemon --stacktrace
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          SECRET_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          SECRET_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SECRET_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Kayitli anahtar kullaniliyor"
+            echo "$KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
+            echo "STORE_PASSWORD=$SECRET_STORE_PASSWORD" >> $GITHUB_ENV
+            echo "KEY_ALIAS=${SECRET_KEY_ALIAS:-upload}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${SECRET_KEY_PASSWORD:-$SECRET_STORE_PASSWORD}" >> $GITHUB_ENV
+          else
+            echo "Yeni anahtar uretiliyor (ILK KEZ)"
+            PASS=$(openssl rand -hex 12)
+            keytool -genkeypair -keystore my-upload-key.jks -storepass "$PASS" \
+              -keypass "$PASS" -alias upload -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=MakineBul,O=MakineBul,C=TR"
+            mkdir -p ../keystore-out
+            cp my-upload-key.jks ../keystore-out/
+            base64 -w0 my-upload-key.jks > ../keystore-out/KEYSTORE_BASE64.txt
+            echo "$PASS" > ../keystore-out/SIFRE.txt
+            echo "STORE_PASSWORD=$PASS" >> $GITHUB_ENV
+            echo "KEY_ALIAS=upload" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=$PASS" >> $GITHUB_ENV
+          fi
+          echo "KEYSTORE_PATH=$PWD/my-upload-key.jks" >> $GITHUB_ENV
+      - name: APK ve AAB derle
+        working-directory: src
+        run: gradle assembleDebug bundleRelease --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: MakineBul-debug-apk
           path: src/app/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MakineBul-PlayStore-aab
+          path: src/app/build/outputs/bundle/release/*.aab
+      - uses: actions/upload-artifact@v4
+        if: hashFiles('keystore-out/SIFRE.txt') != ''
+        with:
+          name: ANAHTAR-SAKLA-kaybetme
+          path: keystore-out/
