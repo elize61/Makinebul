@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Zip'i ac
-        run: unzip -q makinebul-v2.zip -d src
+        run: unzip -q makinebul-v3.4.zip -d src
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
